@@ -432,14 +432,21 @@ function buildOverview(){
 
 /* ── DECISION ENGINE ── */
 function decide(item){
-  if(!stockData.length)return{type:'order',from:'',avail:0};
+  if(!stockData.length)return{type:'order',from:'',avail:0,candidates:[]};
   const prod=stockData.find(s=>s.ref===item.ref||s.product_name===item.product_name);
-  if(!prod)return{type:'order',from:'',avail:0};
+  if(!prod)return{type:'order',from:'',avail:0,candidates:[]};
   const candidates=Object.entries(prod.branches)
     .filter(([br,qty])=>br!==item.branch&&qty>item.requested_qty)
     .sort((a,b)=>b[1]-a[1]);
-  if(candidates.length>0)return{type:'transfer',from:candidates[0][0],avail:candidates[0][1]};
-  return{type:'order',from:'',avail:0};
+  if(candidates.length>0)return{type:'transfer',from:candidates[0][0],avail:candidates[0][1],candidates};
+  return{type:'order',from:'',avail:0,candidates:[]};
+}
+
+// Store user-selected transfer branch per lost item
+const selectedTransferBranch={};
+
+function onTransferBranchChange(lostId, selectedBranch){
+  selectedTransferBranch[lostId] = selectedBranch;
 }
 
 /* ── LOST SALES ── */
@@ -458,13 +465,35 @@ function renderLostSales(){
   tbody.innerHTML=rows.map(l=>{
     const d=decide(l);
     const chip=d.type==='transfer'?'<span class="chip chip-t">🔀 Transfer</span>':'<span class="chip chip-o">🛒 Order</span>';
-    const from=d.type==='transfer'
-      ?`<span class="col-blue" style="font-size:12px">${x(d.from)}</span> <span style="color:var(--text-dim);font-size:11px">(${d.avail})</span>`
-      :'<span style="color:var(--text-dim);font-size:12px">—</span>';
+
+    // Build transfer-from cell — dropdown if multiple candidates exist
+    let fromCell='';
+    if(d.type==='transfer'){
+      if(d.candidates.length===1){
+        // Only one option — just show it
+        fromCell=`<span class="col-blue" style="font-size:12px">${x(d.from)}</span>
+          <span style="color:var(--text-dim);font-size:11px"> (${d.avail} in stock)</span>`;
+      } else {
+        // Multiple options — show dropdown with only branches that have enough stock
+        const currentVal = selectedTransferBranch[l.id] || d.from;
+        const opts = d.candidates.map(([brName,qty])=>
+          `<option value="${x(brName)}" ${brName===currentVal?'selected':''}>${x(brName)} (${qty})</option>`
+        ).join('');
+        fromCell=`<select class="si" style="width:100%;font-size:12px;padding:5px 8px;"
+          onchange="onTransferBranchChange('${l.id}',this.value)">
+          ${opts}
+        </select>`;
+      }
+    } else {
+      fromCell='<span style="color:var(--text-dim);font-size:12px">—</span>';
+    }
+
+    // Action buttons — transfer uses selected branch from dropdown
     const actionBtns=d.type==='transfer'
       ?`<button class="btn btn-blue" onclick="approveTransfer('${l.id}')">✅ Transfer</button>
          <button class="btn btn-purple" style="margin-top:4px" onclick="createOrder('${l.id}')">🛒 Order Instead</button>`
       :`<button class="btn btn-purple" onclick="createOrder('${l.id}')">🛒 Create Order</button>`;
+
     return`<tr id="lost-row-${l.id}">
       <td>${x(l.product_name)}</td>
       <td style="color:var(--text-dim);font-size:12px">${x(l.ref)}</td>
@@ -474,7 +503,7 @@ function renderLostSales(){
       <td>${l.available_qty}</td>
       <td class="col-red">${l.lost_value>0?l.lost_value.toFixed(2)+' SAR':'-'}</td>
       <td>${chip}</td>
-      <td>${from}</td>
+      <td>${fromCell}</td>
       <td style="display:flex;flex-direction:column;gap:4px;">${actionBtns}</td>
     </tr>`;
   }).join('');
@@ -503,20 +532,28 @@ async function approveTransfer(lostId){
   if(!item)return;
   const d=decide(item);
   if(d.type!=='transfer'){alert('No valid transfer source found.');return;}
+
+  // Use user-selected branch if they changed it via dropdown, otherwise use top suggestion
+  const chosenBranch = selectedTransferBranch[lostId] || d.from;
+  const chosenStock  = d.candidates.find(([br])=>br===chosenBranch);
+  const chosenAvail  = chosenStock ? chosenStock[1] : d.avail;
+
   const btns=document.querySelectorAll(`#lost-row-${lostId} button`);
   btns.forEach(b=>{b.disabled=true;});
   const trNum='TRF-'+new Date().toISOString().slice(0,10).replace(/-/g,'')+'-'+String(transferOrders.length+1).padStart(4,'0');
-  const newTr={id:'tr_'+Date.now(),transfer_number:trNum,product_name:item.product_name,ref:item.ref,from_branch:d.from,to_branch:item.branch,qty:item.requested_qty,status:'pending',created_at:new Date().toISOString()};
+  const newTr={id:'tr_'+Date.now(),transfer_number:trNum,product_name:item.product_name,ref:item.ref,from_branch:chosenBranch,to_branch:item.branch,qty:item.requested_qty,status:'pending',created_at:new Date().toISOString()};
   const sRow={transfer_number:trNum,quantity:item.requested_qty,status:'pending',
-    notes:`Product: ${item.product_name} (${item.ref}) | From: ${d.from} | To: ${item.branch}`};
+    notes:`Product: ${item.product_name} (${item.ref}) | From: ${chosenBranch} | To: ${item.branch}`};
   if(productRefToId[item.ref])sRow.product_id=productRefToId[item.ref];
-  if(branchNameToId[d.from.toLowerCase().trim()])sRow.source_branch_id=branchNameToId[d.from.toLowerCase().trim()];
+  if(branchNameToId[chosenBranch.toLowerCase().trim()])sRow.source_branch_id=branchNameToId[chosenBranch.toLowerCase().trim()];
   if(branchNameToId[item.branch.toLowerCase().trim()])sRow.destination_branch_id=branchNameToId[item.branch.toLowerCase().trim()];
   const{error}=await db.from('transfer_orders').insert(sRow);
   if(error)console.warn('Transfer save:',error.message);
   transferOrders.push(newTr);
+  delete selectedTransferBranch[lostId];
   await markActioned(lostId);
   renderTransferOrders();updateBadges();
+  setAlert('tr-alert',`✅ ${trNum} — ${item.product_name} from ${chosenBranch} → ${item.branch}`,'success');
 }
 
 /* ── CREATE ORDER ── */
