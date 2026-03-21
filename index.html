@@ -484,7 +484,7 @@ function populateBranchSelects(){
 }
 
 // ── PROCESS ALL ──
-function processAll(){
+async function processAll(){
   if(!stockData.length && !lostData.length){ setAlert('import-alert','Upload at least one file first.','error'); return; }
   buildOverview();
   renderLostSales();
@@ -492,7 +492,8 @@ function processAll(){
   renderPurchaseOrders();
   updateBadges();
   document.getElementById('import-status').textContent = 'Dashboard updated: '+new Date().toLocaleString();
-  setAlert('import-alert', '✅ Dashboard updated! Switch to any tab to see your data.', 'success');
+  setAlert('import-alert','✅ Dashboard updated! Now saving to Supabase...','success');
+  await saveToSupabase();
 }
 
 // ── OVERVIEW ──
@@ -675,9 +676,16 @@ async function createOrder(lostId){
   setAlert('po-alert',`✅ Purchase order ${poNum} created — ${item.product_name} for ${item.branch}`,'success');
 }
 
-function markActioned(lostId){
+async function markActioned(lostId){
   const item = pendingLost.find(l=>l.id===lostId);
-  if(item) item.actioned = true;
+  if(item){
+    item.actioned = true;
+    // Delete from Supabase so it never reappears
+    if(item.supabase_id){
+      const {error} = await db.from('lost_sales').delete().eq('id',item.supabase_id);
+      if(error) console.warn('lost_sales delete:',error.message);
+    }
+  }
   pendingLost = pendingLost.filter(l=>!l.actioned);
   const row = document.getElementById('lost-row-'+lostId);
   if(row){ row.style.opacity='0'; row.style.transition='opacity .3s'; setTimeout(()=>row.remove(),300); }
@@ -864,37 +872,102 @@ function exportAllBranches(){
 
 // ── SAVE TO SUPABASE ──
 async function saveToSupabase(){
-  if(!stockData.length){ setAlert('import-alert','No stock data to save','error'); return; }
+  if(!stockData.length && !lostData.length){ setAlert('import-alert','No data to save','error'); return; }
   setAlert('import-alert','<span class="spinner"></span>Saving to Supabase...','info');
+
   // 1. Save branches
-  const branchRows = branches.map(name=>({name}));
-  const {error:bErr} = await db.from('branches').upsert(branchRows,{onConflict:'name',ignoreDuplicates:true});
-  if(bErr){ setAlert('import-alert','Branch error: '+bErr.message,'error'); return; }
+  if(branches.length){
+    const branchRows = branches.map(name=>({name}));
+    const {error:bErr} = await db.from('branches').upsert(branchRows,{onConflict:'name',ignoreDuplicates:true});
+    if(bErr){ setAlert('import-alert','Branch error: '+bErr.message,'error'); return; }
+  }
   // Load branch UUIDs
-  const {data:brData} = await db.from('branches').select('id,name').in('name',branches);
-  if(brData) brData.forEach(b=>{ branchNameToId[b.name]=b.id; });
+  if(branches.length){
+    const {data:brData} = await db.from('branches').select('id,name').in('name',branches);
+    if(brData) brData.forEach(b=>{ branchNameToId[b.name]=b.id; });
+  }
+
   // 2. Save products
-  const prodRows = stockData.map(s=>({
-    product_ref: s.ref,
-    sku:         s.ref,
-    name:        s.product_name,
-    brand:       s.brand||null,
-    category:    s.category||null,
-    sale_price:  s.sale_price||null,
-    cost:        s.cost||null,
-    is_active:   s.category.toLowerCase()!==INACTIVE_CAT,
-  }));
-  const {error:pErr} = await db.from('products').upsert(prodRows,{onConflict:'product_ref',ignoreDuplicates:true});
-  if(pErr){ setAlert('import-alert','Products warning: '+pErr.message,'error'); return; }
-  // Load product UUIDs
-  const refs = stockData.map(s=>s.ref).filter(Boolean);
-  const {data:prData} = await db.from('products').select('id,product_ref').in('product_ref',refs.slice(0,500));
-  if(prData) prData.forEach(p=>{ productRefToId[p.product_ref]=p.id; });
-  setAlert('import-alert',`✅ Saved ${branchRows.length} branches + ${prodRows.length} products to Supabase`,'success');
+  if(stockData.length){
+    const prodRows = stockData.map(s=>({
+      product_ref: s.ref, sku: s.ref, name: s.product_name,
+      brand: s.brand||null, category: s.category||null,
+      sale_price: s.sale_price||null, cost: s.cost||null,
+      is_active: s.category.toLowerCase()!==INACTIVE_CAT,
+    }));
+    const {error:pErr} = await db.from('products').upsert(prodRows,{onConflict:'product_ref',ignoreDuplicates:true});
+    if(pErr){ setAlert('import-alert','Products error: '+pErr.message,'error'); return; }
+    // Load product UUIDs (batch in chunks of 500)
+    const refs = [...new Set(stockData.map(s=>s.ref).filter(Boolean))];
+    for(let i=0;i<refs.length;i+=500){
+      const {data:prData} = await db.from('products').select('id,product_ref').in('product_ref',refs.slice(i,i+500));
+      if(prData) prData.forEach(p=>{ productRefToId[p.product_ref]=p.id; });
+    }
+  }
+
+  // 3. Save branch_stock (upsert by branch_id + product_id)
+  if(stockData.length && Object.keys(branchNameToId).length && Object.keys(productRefToId).length){
+    const stockRows = [];
+    const now = new Date().toISOString();
+    stockData.forEach(s=>{
+      const pid = productRefToId[s.ref];
+      if(!pid) return;
+      Object.entries(s.branches).forEach(([brName,qty])=>{
+        const bid = branchNameToId[brName];
+        if(!bid) return;
+        stockRows.push({ branch_id:bid, product_id:pid, quantity:qty, last_synced_at:now });
+      });
+    });
+    // Upsert in batches of 500
+    for(let i=0;i<stockRows.length;i+=500){
+      const {error:sErr} = await db.from('branch_stock').upsert(stockRows.slice(i,i+500),{onConflict:'branch_id,product_id'});
+      if(sErr){ console.warn('branch_stock batch error:',sErr.message); }
+    }
+  }
+
+  // 4. Save lost_sales — clear old pending first then insert fresh batch
+  if(lostData.length){
+    const batchId = 'batch_'+new Date().toISOString().slice(0,10).replace(/-/g,'')+'_'+Date.now();
+    // Delete existing pending items (avoid duplicates on re-import)
+    await db.from('lost_sales').delete().eq('status','pending');
+
+    const lostRows = [];
+    lostData.forEach(l=>{
+      const pid = productRefToId[l.ref];
+      const bid = branchNameToId[l.branch];
+      lostRows.push({
+        date:             l.date||new Date().toISOString().split('T')[0],
+        branch_id:        bid||null,
+        product_id:       pid||null,
+        requested_qty:    l.requested_qty,
+        available_qty:    l.available_qty,
+        lost_value:       l.lost_value,
+        responsible_user: l.responsible||null,
+        status:           'pending',
+        import_batch:     batchId,
+      });
+    });
+    // Insert in batches of 500
+    for(let i=0;i<lostRows.length;i+=500){
+      const {error:lErr} = await db.from('lost_sales').insert(lostRows.slice(i,i+500));
+      if(lErr){ console.warn('lost_sales batch error:',lErr.message); }
+    }
+    // Reload lost_sales to get their Supabase IDs
+    await loadLostSalesFromSupabase();
+  }
+
+  setAlert('import-alert',`✅ All data saved to Supabase — ${branches.length} branches, ${stockData.length} products, ${lostData.length} lost sales`,'success');
+  document.getElementById('import-status').textContent = 'Saved: '+new Date().toLocaleString();
 }
 
 // ── LOAD FROM SUPABASE ──
 async function loadFromSupabase(){
+  // Load branch + product UUID maps first
+  const {data:brData} = await db.from('branches').select('id,name');
+  if(brData) brData.forEach(b=>{ branchNameToId[b.name]=b.id; });
+  const {data:prData} = await db.from('products').select('id,product_ref,name,category,sale_price,cost,brand');
+  if(prData) prData.forEach(p=>{ productRefToId[p.product_ref]=p.id; });
+
   // Load existing transfer orders
   const {data:trData} = await db.from('transfer_orders').select('*').order('created_at',{ascending:false}).limit(200);
   if(trData){
@@ -910,6 +983,7 @@ async function loadFromSupabase(){
       created_at: t.created_at,
     }));
   }
+
   // Load existing purchase orders
   const {data:poData} = await db.from('purchase_orders').select('*').order('created_at',{ascending:false}).limit(200);
   if(poData){
@@ -927,8 +1001,52 @@ async function loadFromSupabase(){
       created_at: p.created_at,
     }));
   }
+
+  // Load pending lost sales
+  await loadLostSalesFromSupabase();
+
   renderTransferOrders();
   renderPurchaseOrders();
+  updateBadges();
+}
+
+// ── LOAD LOST SALES FROM SUPABASE ──
+async function loadLostSalesFromSupabase(){
+  const {data,error} = await db.from('lost_sales')
+    .select('*, products(product_ref,name,category,cost,sale_price,brand), branches(name)')
+    .eq('status','pending')
+    .order('created_at',{ascending:false});
+  if(error){ console.warn('lost_sales load:',error.message); return; }
+  if(!data||!data.length) return;
+
+  // Rebuild lostData and pendingLost from Supabase records
+  lostData = data.map(l=>({
+    id:            'ls_'+l.id,        // local id
+    supabase_id:   l.id,              // real Supabase UUID for delete
+    date:          l.date||'',
+    branch:        l.branches?.name||'',
+    ref:           l.products?.product_ref||'',
+    product_name:  l.products?.name||'',
+    supplier:      '',
+    category:      l.products?.category||'',
+    cost:          parseFloat(l.products?.cost)||0,
+    sale_price:    parseFloat(l.products?.sale_price)||0,
+    requested_qty: l.requested_qty||0,
+    available_qty: l.available_qty||0,
+    lost_value:    parseFloat(l.lost_value)||0,
+    responsible:   l.responsible_user||'',
+    actioned:      false,
+  }));
+  pendingLost = [...lostData];
+
+  // Populate lost branch filter
+  const sel = document.getElementById('lost-branch');
+  while(sel.options.length>1) sel.remove(1);
+  [...new Set(lostData.map(l=>l.branch).filter(Boolean))].sort().forEach(b=>{
+    const o=document.createElement('option');o.value=b;o.textContent=b;sel.appendChild(o);
+  });
+
+  renderLostSales();
   updateBadges();
 }
 
