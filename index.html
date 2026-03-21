@@ -997,7 +997,12 @@ async function saveToSupabase(){
     }));
     for(let i=0;i<lostRows.length;i+=500)
       await db.from('lost_sales').insert(lostRows.slice(i,i+500));
-    await loadLostSalesFromSupabase();
+    // Don't reload from Supabase — keep local data so Lost Sales tab shows immediately
+    // Local lostData already has supplier/user info that Supabase join may miss
+    pendingLost = lostData.filter(l=>!l.actioned);
+    renderLostSales();
+    updateBadges();
+    buildOverview();
   }
   setAlert('import-alert','✅ All data saved to Supabase!','success');
   document.getElementById('import-status').textContent='Saved: '+new Date().toLocaleString();
@@ -1048,57 +1053,75 @@ async function loadFromSupabase(){
 
 // ── LOAD STOCK FROM SUPABASE ──
 async function loadStockFromSupabase(){
-  document.getElementById('last-sync-label').textContent='Loading stock...';
-  stockData=[];
-  // Get all products
-  const prodMap={};
-  let page=0;
+  const syncLabel = document.getElementById('last-sync-label');
+  if(syncLabel) syncLabel.textContent = 'Loading stock...';
+  stockData = [];
+
+  // Step 1 — Load products
+  const prodMap = {};
+  let page = 0;
   while(true){
-    const{data}=await db.from('products').select('id,product_ref,name,category,brand,sale_price,cost,is_active').range(page*1000,(page+1)*1000-1);
-    if(!data||!data.length)break;
-    data.forEach(p=>{if(p.is_active!==false)prodMap[p.id]=p;});
-    if(data.length<1000)break;page++;
+    const { data, error } = await db.from('products')
+      .select('id,product_ref,name,category,brand,sale_price,cost,is_active')
+      .range(page*1000, (page+1)*1000-1);
+    if(error){ console.error('products load error:', error.message); break; }
+    if(!data || !data.length) break;
+    data.forEach(p => { prodMap[p.id] = p; });
+    if(data.length < 1000) break;
+    page++;
   }
-  // Get branch_stock with branch info
-  const branchStockMap={};
-  let sPage=0;
+  console.log('Products loaded:', Object.keys(prodMap).length);
+
+  // Step 2 — Load branch_stock
+  const branchStockMap = {};
+  let sPage = 0;
   while(true){
-    const{data}=await db.from('branch_stock').select('product_id,branch_id,quantity,last_synced_at').range(sPage*1000,(sPage+1)*1000-1);
-    if(!data||!data.length)break;
-    data.forEach(row=>{
-      if(!branchStockMap[row.product_id])branchStockMap[row.product_id]={};
-      branchStockMap[row.product_id][row.branch_id]=row.quantity;
+    const { data, error } = await db.from('branch_stock')
+      .select('product_id,branch_id,quantity')
+      .range(sPage*1000, (sPage+1)*1000-1);
+    if(error){ console.error('branch_stock load error:', error.message); break; }
+    if(!data || !data.length) break;
+    data.forEach(row => {
+      if(!branchStockMap[row.product_id]) branchStockMap[row.product_id] = {};
+      branchStockMap[row.product_id][row.branch_id] = row.quantity;
     });
-    if(data.length<1000)break;sPage++;
+    if(data.length < 1000) break;
+    sPage++;
   }
-  // Build idToName map for branches
-  const brIdToName={};
-  Object.entries(branchNameToId).forEach(([name,id])=>{brIdToName[id]=name;});
-  // Build stockData
-  Object.values(prodMap).forEach(p=>{
-    const branchQty={};
-    const bStock=branchStockMap[p.id]||{};
-    let totalQoh=0;
-    Object.entries(bStock).forEach(([bid,qty])=>{
-      const bName=brIdToName[bid];
-      if(bName){branchQty[bName]=qty;totalQoh+=qty;}
+  console.log('branch_stock rows loaded:', Object.values(branchStockMap).reduce((a,v)=>a+Object.keys(v).length,0));
+
+  // Step 3 — Build brIdToName map
+  const brIdToName = {};
+  Object.entries(branchNameToId).forEach(([name,id]) => { brIdToName[id] = name; });
+  console.log('Branch name map:', brIdToName);
+
+  // Step 4 — Build stockData
+  Object.values(prodMap).forEach(p => {
+    const bStock = branchStockMap[p.id] || {};
+    const branchQty = {};
+    let totalQoh = 0;
+    Object.entries(bStock).forEach(([bid, qty]) => {
+      const bName = brIdToName[bid];
+      if(bName){ branchQty[bName] = qty; totalQoh += qty; }
     });
     stockData.push({
-      product_name:p.name||'',
-      ref:p.product_ref||'',
-      sale_price:parseFloat(p.sale_price)||0,
-      cost:parseFloat(p.cost)||0,
-      supplier_name:'',
-      brand:p.brand||'',
-      category:p.category||'',
-      total_qoh:totalQoh,
-      branches:branchQty,
+      product_name: p.name || '',
+      ref: p.product_ref || '',
+      sale_price: parseFloat(p.sale_price) || 0,
+      cost: parseFloat(p.cost) || 0,
+      supplier_name: '',
+      brand: p.brand || '',
+      category: p.category || '',
+      total_qoh: totalQoh,
+      branches: branchQty,
     });
   });
+
+  console.log('stockData built:', stockData.length, '| active:', stockData.filter(isActive).length);
+
   populateOvFilters();
   buildOverview();
-  const now=new Date().toLocaleString();
-  document.getElementById('last-sync-label').textContent='Last sync: '+now;
+  if(syncLabel) syncLabel.textContent = `Last sync: ${new Date().toLocaleString()} (${stockData.filter(isActive).length} products)`;
 }
 
 // ── LOAD LOST SALES ──
@@ -1106,8 +1129,12 @@ async function loadLostSalesFromSupabase(){
   const{data,error}=await db.from('lost_sales')
     .select('*, products(product_ref,name,category,cost,sale_price), branches(name)')
     .eq('status','pending').order('created_at',{ascending:false});
-  if(error){console.warn('lost_sales:',error.message);return;}
-  if(!data||!data.length){pendingLost=[];renderLostSales();updateBadges();return;}
+  if(error){console.warn('lost_sales load:',error.message);return;}
+  // If nothing in Supabase AND we already have local data, keep local data
+  if(!data||!data.length){
+    if(!pendingLost.length){renderLostSales();updateBadges();}
+    return;
+  }
   lostData=data.map(l=>({
     id:'ls_'+l.id,supabase_id:l.id,
     date:l.date||'',
@@ -1123,8 +1150,7 @@ async function loadLostSalesFromSupabase(){
     responsible_user:l.responsible_user||'',
     actioned:false,
   }));
-  // Also store in lostRawData for charts
-  if(!lostRawData.length)lostRawData=lostData.map(l=>({...l,responsible_user:l.responsible_user}));
+  if(!lostRawData.length)lostRawData=[...lostData];
   pendingLost=[...lostData];
   const sel=document.getElementById('lost-branch');
   if(sel){
@@ -1133,8 +1159,7 @@ async function loadLostSalesFromSupabase(){
       const o=document.createElement('option');o.value=b;o.textContent=b;sel.appendChild(o);
     });
   }
-  renderLostSales();updateBadges();
-  buildOverview();
+  renderLostSales();updateBadges();buildOverview();
 }
 
 // ── BADGES ──
