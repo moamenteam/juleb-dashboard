@@ -357,14 +357,6 @@ let charts={};
 
 // Transfer branch selection per item
 const selectedTransferBranch={};
-
-// ── AUTH ──
-async function doLogin(){
-  const email=document.getElementById('email').value.trim();
-  const pass=document.getElementById('password').value;
-  const btn=document.getElementById('login-btn');
-  document.getElementById('login-error').textContent='';
-  btn.disabled=true; btn.textContent='Signing in...';
 const CATEGORIES=['Medicines','Milk','Diapers','Cosmotics','Medical Aid'];
 
 /* ── AUTH TABS ── */
