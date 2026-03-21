@@ -141,7 +141,7 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
         <div class="stat-card"><div class="stat-label">Needs Order</div><div class="stat-value red" id="st-needorder">—</div></div>
       </div>
       <div class="table-wrap">
-        <div class="table-toolbar"><span class="table-toolbar-title">🚨 Zero / Low Stock (Total QoH ≤ 5)</span></div>
+        <div class="table-toolbar"><span class="table-toolbar-title">🚨 Zero / Low Stock (Total QoH ≤ 5)</span><span style="font-size:12px;color:var(--text-dim)">"New Data" inactive SKUs excluded</span></div>
         <table><thead><tr><th>Product</th><th>Ref</th><th>Supplier</th><th>Category</th><th>Total QoH</th><th>Status</th></tr></thead>
         <tbody id="ov-body"><tr class="empty-row"><td colspan="6">Import data first — go to the Import Data tab</td></tr></tbody></table>
       </div>
@@ -469,12 +469,17 @@ function processAll(){
   setAlert('import-alert','✅ Dashboard updated! Switch to any tab to see your data.','success');
 }
 
+// "New Data" = inactive SKUs — always excluded from alerts and stats
+const INACTIVE_CAT='new data';
+function isActive(s){return s.category.toLowerCase()!==INACTIVE_CAT;}
+
 /* ── OVERVIEW ── */
 function buildOverview(){
   if(!stockData.length)return;
-  const zero=stockData.filter(s=>s.total_qoh<=0).length;
-  const low=stockData.filter(s=>s.total_qoh>0&&s.total_qoh<=5).length;
-  document.getElementById('st-products').textContent=stockData.length.toLocaleString();
+  const active=stockData.filter(isActive);
+  const zero=active.filter(s=>s.total_qoh<=0).length;
+  const low=active.filter(s=>s.total_qoh>0&&s.total_qoh<=5).length;
+  document.getElementById('st-products').textContent=active.length.toLocaleString();
   document.getElementById('st-zero').textContent=zero.toLocaleString();
   document.getElementById('st-low').textContent=low.toLocaleString();
   document.getElementById('last-import-label').textContent='Last import: '+new Date().toLocaleString();
@@ -484,7 +489,7 @@ function buildOverview(){
     document.getElementById('st-transfer').textContent=decs.filter(d=>d.type==='transfer').length;
     document.getElementById('st-needorder').textContent=decs.filter(d=>d.type==='order').length;
   }
-  const alerts=stockData.filter(s=>s.total_qoh<=5).sort((a,b)=>a.total_qoh-b.total_qoh).slice(0,50);
+  const alerts=active.filter(s=>s.total_qoh<=5).sort((a,b)=>a.total_qoh-b.total_qoh).slice(0,50);
   const tbody=document.getElementById('ov-body');
   if(!alerts.length){tbody.innerHTML='<tr class="empty-row"><td colspan="6">✅ No zero/low stock items</td></tr>';return;}
   tbody.innerHTML=alerts.map(s=>`<tr>
