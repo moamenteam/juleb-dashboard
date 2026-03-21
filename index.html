@@ -656,8 +656,17 @@ async function saveToSupabase(){
   const branchRows=branches.map(name=>({name}));
   const {error:bErr}=await db.from('branches').upsert(branchRows,{onConflict:'name',ignoreDuplicates:true});
   if(bErr){setAlert('import-alert','Branch error: '+bErr.message,'error');return;}
-  const prodRows=stockData.map(s=>({sku:s.ref,name:s.product_name,category:s.category,supplier:s.supplier_name,brand:s.brand,sale_price:s.sale_price,cost:s.cost}));
-  const {error:pErr}=await db.from('products').upsert(prodRows,{onConflict:'sku',ignoreDuplicates:true});
+  const prodRows=stockData.map(s=>({
+    product_ref:s.ref,
+    sku:s.ref,
+    name:s.product_name,
+    brand:s.brand||null,
+    category:s.category||null,
+    sale_price:s.sale_price||null,
+    cost:s.cost||null,
+    is_active:true,
+  }));
+  const {error:pErr}=await db.from('products').upsert(prodRows,{onConflict:'product_ref',ignoreDuplicates:true});
   if(pErr){setAlert('import-alert','Products warning: '+pErr.message,'error');return;}
   setAlert('import-alert',`✅ Saved ${branchRows.length} branches + ${prodRows.length} products to Supabase`,'success');
 }
