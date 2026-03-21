@@ -138,16 +138,34 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
 </head>
 <body>
 
-<!-- LOGIN -->
+<!-- LOGIN / SIGNUP -->
 <div id="login-screen">
   <div class="login-card">
     <div class="logo-row"><div class="logo-dot"></div><span class="logo-text">Juleb</span></div>
-    <h2>Sign in to your dashboard</h2>
-    <p>Pharmacy management & ordering system</p>
-    <div class="field"><label>Email</label><input type="email" id="email" placeholder="you@example.com" autocomplete="username"></div>
-    <div class="field"><label>Password</label><input type="password" id="password" placeholder="••••••••" autocomplete="current-password"></div>
-    <button class="btn-primary" id="login-btn" onclick="doLogin()">Sign in</button>
-    <div id="login-error"></div>
+
+    <!-- Tabs -->
+    <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--border);">
+      <div id="tab-login" onclick="switchAuthTab('login')" style="flex:1;text-align:center;padding:10px;font-size:14px;font-weight:600;cursor:pointer;color:var(--accent);border-bottom:2px solid var(--accent);">Sign In</div>
+      <div id="tab-signup" onclick="switchAuthTab('signup')" style="flex:1;text-align:center;padding:10px;font-size:14px;font-weight:600;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent;">Create Account</div>
+    </div>
+
+    <!-- Login form -->
+    <div id="form-login">
+      <div class="field"><label>Email</label><input type="email" id="email" placeholder="you@example.com" autocomplete="username"></div>
+      <div class="field"><label>Password</label><input type="password" id="password" placeholder="••••••••" autocomplete="current-password"></div>
+      <button class="btn-primary" id="login-btn" onclick="doLogin()">Sign in</button>
+      <div id="login-error"></div>
+    </div>
+
+    <!-- Signup form -->
+    <div id="form-signup" style="display:none;">
+      <div class="field"><label>Email</label><input type="email" id="signup-email" placeholder="you@example.com"></div>
+      <div class="field"><label>Password</label><input type="password" id="signup-password" placeholder="Min 6 characters"></div>
+      <div class="field"><label>Confirm Password</label><input type="password" id="signup-confirm" placeholder="Repeat password"></div>
+      <button class="btn-primary" id="signup-btn" onclick="doSignup()">Create Account</button>
+      <div id="signup-msg" style="font-size:13px;margin-top:12px;text-align:center;min-height:18px;"></div>
+    </div>
+
   </div>
 </div>
 
@@ -295,36 +313,22 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
 
     <!-- ══ ADMIN PANEL ══ -->
     <div class="page" id="page-admin">
-      <div class="section-title">Admin Panel <small>Manage users & tab permissions</small></div>
+      <div class="section-title">Admin Panel <small>Manage users & permissions</small></div>
       <div id="admin-alert"></div>
 
-      <!-- Add User -->
-      <div class="add-user-form">
-        <h3>➕ Add New User</h3>
-        <div class="form-row">
-          <div class="form-field">
-            <label>Email</label>
-            <input type="email" id="new-user-email" placeholder="user@example.com" style="width:240px">
-          </div>
-          <div class="form-field">
-            <label>Role</label>
-            <select id="new-user-role">
-              <option value="purchasing">Purchasing</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label>&nbsp;</label>
-            <button class="btn btn-green" onclick="addUser()">Add User</button>
-          </div>
-        </div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:10px;">
-          ℹ️ The user must first create an account at <strong>your dashboard URL</strong> before you can assign permissions. Once they sign up, they'll appear here.
-        </div>
+      <!-- Pending Users (signed up but not activated) -->
+      <div class="add-user-form" style="margin-bottom:20px;">
+        <h3>⏳ Pending Activation <span id="pending-count" style="color:var(--yellow);font-size:13px;font-weight:400;margin-left:8px;"></span></h3>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px;">Users who signed up and are waiting for activation.</p>
+        <div id="pending-users-list"><span style="color:var(--text-dim);font-size:13px;">No pending users</span></div>
       </div>
 
-      <!-- Users List -->
-      <div id="users-list"><div class="loading-row" style="text-align:center;padding:40px;color:var(--text-dim);"><span class="spinner"></span>Loading users...</div></div>
+      <!-- Active Users -->
+      <div class="add-user-form">
+        <h3>👥 Active Users</h3>
+      </div>
+      <div id="users-list"><div style="text-align:center;padding:40px;color:var(--text-dim);"><span class="spinner"></span>Loading users...</div></div>
+    </div>
     </div>
 
   </div>
@@ -361,9 +365,59 @@ async function doLogin(){
   const btn=document.getElementById('login-btn');
   document.getElementById('login-error').textContent='';
   btn.disabled=true; btn.textContent='Signing in...';
+const CATEGORIES=['Medicines','Milk','Diapers','Cosmotics','Medical Aid'];
+
+/* ── AUTH TABS ── */
+function switchAuthTab(tab){
+  document.getElementById('form-login').style.display  = tab==='login'  ?'block':'none';
+  document.getElementById('form-signup').style.display = tab==='signup' ?'block':'none';
+  document.getElementById('tab-login').style.color         = tab==='login'  ?'var(--accent)':'var(--text-dim)';
+  document.getElementById('tab-signup').style.color        = tab==='signup' ?'var(--accent)':'var(--text-dim)';
+  document.getElementById('tab-login').style.borderBottom  = tab==='login'  ?'2px solid var(--accent)':'2px solid transparent';
+  document.getElementById('tab-signup').style.borderBottom = tab==='signup' ?'2px solid var(--accent)':'2px solid transparent';
+}
+
+/* ── SIGNUP ── */
+async function doSignup(){
+  const email   = document.getElementById('signup-email').value.trim();
+  const pass    = document.getElementById('signup-password').value;
+  const confirm = document.getElementById('signup-confirm').value;
+  const msg     = document.getElementById('signup-msg');
+  const btn     = document.getElementById('signup-btn');
+  msg.style.color='var(--red)'; msg.textContent='';
+  if(!email||!pass){msg.textContent='Please fill in all fields.';return;}
+  if(pass.length<6){msg.textContent='Password must be at least 6 characters.';return;}
+  if(pass!==confirm){msg.textContent='Passwords do not match.';return;}
+  btn.disabled=true; btn.textContent='Creating account...';
+  const{data,error}=await db.auth.signUp({email,password:pass});
+  if(error){msg.textContent=error.message;btn.disabled=false;btn.textContent='Create Account';return;}
+  await db.from('user_profiles').upsert({
+    email,role:'purchasing',is_active:false,
+    tab_overview:false,tab_import:false,
+    tab_lostsales:true,tab_transfers:true,tab_purchase:true,
+    allowed_categories:[]
+  },{onConflict:'email',ignoreDuplicates:true});
+  msg.style.color='var(--accent)';
+  msg.textContent='✅ Account created! Please wait for admin to activate your account.';
+  btn.disabled=false; btn.textContent='Create Account';
+}
+
+/* ── LOGIN ── */
+async function doLogin(){
+  const email=document.getElementById('email').value.trim();
+  const pass=document.getElementById('password').value;
+  const btn=document.getElementById('login-btn');
+  document.getElementById('login-error').textContent='';
+  btn.disabled=true; btn.textContent='Signing in...';
   const{data,error}=await db.auth.signInWithPassword({email,password:pass});
-  if(error){document.getElementById('login-error').textContent=error.message;btn.disabled=false;btn.textContent='Sign in';}
-  else initApp(data.user);
+  if(error){document.getElementById('login-error').textContent=error.message;btn.disabled=false;btn.textContent='Sign in';return;}
+  const{data:profile}=await db.from('user_profiles').select('*').eq('email',email).single();
+  if(profile&&profile.is_active===false){
+    await db.auth.signOut();
+    document.getElementById('login-error').textContent='⏳ Your account is pending activation by admin.';
+    btn.disabled=false;btn.textContent='Sign in';return;
+  }
+  initApp(data.user);
 }
 document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 async function doLogout(){await db.auth.signOut();location.reload();}
@@ -807,9 +861,13 @@ function renderPurchaseOrders(){
   const q=(document.getElementById('po-search').value||'').toLowerCase();
   const br=document.getElementById('po-branch').value;
   const container=document.getElementById('po-container');
+  // Category filter for purchasing users
+  const allowedCats=currentProfile&&currentProfile.role!=='admin'&&currentProfile.allowed_categories&&currentProfile.allowed_categories.length
+    ? currentProfile.allowed_categories.map(c=>c.toLowerCase()) : null;
   const rows=purchaseOrders.filter(p=>{
     const nm=(p.product_name+' '+p.ref).toLowerCase();
-    return nm.includes(q)&&(!br||p.branch===br);
+    const catOk=!allowedCats||allowedCats.includes((p.category||'').toLowerCase());
+    return nm.includes(q)&&(!br||p.branch===br)&&catOk;
   });
   if(!rows.length){container.innerHTML='<div style="text-align:center;color:var(--text-dim);padding:40px;font-size:14px;">No purchase orders yet</div>';return;}
   const grouped={};
@@ -879,9 +937,36 @@ function exportPOExcel(){
 // ── ADMIN: LOAD USERS ──
 async function loadUsers(){
   const{data,error}=await db.from('user_profiles').select('*').order('created_at',{ascending:false});
-  if(error){document.getElementById('users-list').innerHTML='<div style="color:var(--red);padding:20px;">Error loading users: '+error.message+'</div>';return;}
-  if(!data||!data.length){document.getElementById('users-list').innerHTML='<div style="color:var(--text-dim);padding:20px;text-align:center;">No users yet. Add one above.</div>';return;}
-  document.getElementById('users-list').innerHTML=data.map(u=>renderUserCard(u)).join('');
+  if(error){document.getElementById('users-list').innerHTML='<div style="color:var(--red);padding:20px;">Error: '+error.message+'</div>';return;}
+  if(!data||!data.length){document.getElementById('users-list').innerHTML='<div style="color:var(--text-dim);padding:20px;text-align:center;">No users yet.</div>';return;}
+
+  // Split pending vs active
+  const pending=data.filter(u=>!u.is_active);
+  const active=data.filter(u=>u.is_active);
+
+  // Render pending
+  const pendingEl=document.getElementById('pending-users-list');
+  const countEl=document.getElementById('pending-count');
+  if(pending.length){
+    countEl.textContent='('+pending.length+' pending)';
+    pendingEl.innerHTML=pending.map(u=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-weight:600;font-size:14px;">${x(u.email)}</div>
+          <div style="font-size:12px;color:var(--text-dim);">Signed up — waiting activation</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-green" onclick="activateUser('${u.id}','${x(u.email)}')">✅ Activate</button>
+          <button class="btn btn-red" onclick="deleteUser('${u.id}','${x(u.email)}')">🗑 Reject</button>
+        </div>
+      </div>`).join('');
+  } else {
+    countEl.textContent='';
+    pendingEl.innerHTML='<span style="color:var(--text-dim);font-size:13px;">No pending users</span>';
+  }
+
+  // Render active
+  document.getElementById('users-list').innerHTML=active.map(u=>renderUserCard(u)).join('');
 }
 
 function renderUserCard(u){
@@ -900,55 +985,78 @@ function renderUserCard(u){
       </label>
       ${t.label}
     </div>`).join('');
+
+  // Category checkboxes (only relevant for purchasing users)
+  const allowedCats=u.allowed_categories||[];
+  const catChecks=CATEGORIES.map(cat=>`
+    <div class="toggle-item">
+      <label class="toggle">
+        <input type="checkbox" ${allowedCats.includes(cat)?'checked':''} onchange="updateUserCategory('${u.id}','${cat}',this.checked,'${x(u.email)}')">
+        <span class="toggle-slider"></span>
+      </label>
+      <span style="font-size:12px;">${cat}</span>
+    </div>`).join('');
+
   return`<div class="user-card">
     <div class="user-card-header">
       <div>
         <div class="user-email">${x(u.email)}</div>
-        <div style="margin-top:4px;">
+        <div style="margin-top:4px;display:flex;align-items:center;gap:8px;">
           <select class="si" style="font-size:12px;padding:4px 8px;" onchange="updateUserRole('${u.id}',this.value)">
             <option value="purchasing" ${u.role==='purchasing'?'selected':''}>Purchasing</option>
             <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
           </select>
+          <span class="badge ${u.is_active?'badge-green':'badge-yellow'}">${u.is_active?'Active':'Inactive'}</span>
         </div>
       </div>
       <button class="btn btn-red" onclick="deleteUser('${u.id}','${x(u.email)}')">🗑 Remove</button>
     </div>
-    <div class="toggle-row">${toggles}</div>
+    <div style="margin-bottom:10px;">
+      <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Tab Access</div>
+      <div class="toggle-row">${toggles}</div>
+    </div>
+    ${u.role==='purchasing'?`<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
+      <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Allowed Categories (Purchase Orders)</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Leave all unchecked = sees all categories</div>
+      <div class="toggle-row">${catChecks}</div>
+    </div>`:''}
   </div>`;
 }
 
-async function addUser(){
-  const email=document.getElementById('new-user-email').value.trim();
-  const role=document.getElementById('new-user-role').value;
-  if(!email){setAlert('admin-alert','Please enter an email address','error');return;}
-  const defaults={purchasing:{tab_overview:false,tab_import:false,tab_lostsales:true,tab_transfers:true,tab_purchase:true},
-    admin:{tab_overview:true,tab_import:true,tab_lostsales:true,tab_transfers:true,tab_purchase:true}};
-  const row={email,role,...defaults[role]};
-  const{error}=await db.from('user_profiles').insert(row);
+async function activateUser(id,email){
+  const{error}=await db.from('user_profiles').update({is_active:true}).eq('id',id);
   if(error){setAlert('admin-alert','Error: '+error.message,'error');return;}
-  document.getElementById('new-user-email').value='';
-  setAlert('admin-alert',`✅ User ${email} added as ${role}`,'success');
+  setAlert('admin-alert',`✅ ${email} activated successfully`,'success');
   loadUsers();
 }
 
 async function updateUserTab(id,tabKey,val){
   const update={};update[tabKey]=val;
-  const{error}=await db.from('user_profiles').update(update).eq('id',id);
-  if(error)console.warn('tab update:',error.message);
+  await db.from('user_profiles').update(update).eq('id',id);
 }
 
 async function updateUserRole(id,role){
-  const{error}=await db.from('user_profiles').update({role}).eq('id',id);
-  if(error)console.warn('role update:',error.message);
+  await db.from('user_profiles').update({role}).eq('id',id);
+  loadUsers();
+}
+
+async function updateUserCategory(id,cat,checked,email){
+  // Load current categories then update
+  const{data}=await db.from('user_profiles').select('allowed_categories').eq('id',id).single();
+  let cats=(data?.allowed_categories||[]);
+  if(checked){if(!cats.includes(cat))cats.push(cat);}
+  else{cats=cats.filter(c=>c!==cat);}
+  await db.from('user_profiles').update({allowed_categories:cats}).eq('id',id);
 }
 
 async function deleteUser(id,email){
   if(!confirm(`Remove ${email}?`))return;
   const{error}=await db.from('user_profiles').delete().eq('id',id);
   if(error){setAlert('admin-alert','Error: '+error.message,'error');return;}
-  setAlert('admin-alert',`✅ User ${email} removed`,'success');
+  setAlert('admin-alert',`✅ ${email} removed`,'success');
   loadUsers();
 }
+
 
 // ── SAVE TO SUPABASE ──
 async function saveToSupabase(){
