@@ -172,11 +172,9 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
   <div class="nav-tabs">
     <div class="tab active" onclick="showPage('overview',this)">📊 Overview</div>
     <div class="tab" onclick="showPage('import',this)">📥 Import Data</div>
-    <div class="tab" onclick="showPage('stock',this)">📦 Stock</div>
     <div class="tab" onclick="showPage('lostsales',this)">🔍 Lost Sales<span class="tab-badge" id="badge-lost" style="display:none">0</span></div>
     <div class="tab" onclick="showPage('transfers',this)">🔀 Transfer Orders<span class="tab-badge" id="badge-transfer" style="display:none;background:var(--blue)">0</span></div>
     <div class="tab" onclick="showPage('purchase',this)">🛒 Purchase Orders<span class="tab-badge" id="badge-po" style="display:none;background:var(--purple)">0</span></div>
-    <div class="tab" onclick="showPage('branchreport',this)">🏪 Branch Reports</div>
   </div>
 
   <div class="content">
@@ -233,28 +231,6 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
       <div id="import-status" style="margin-top:14px;font-size:13px;color:var(--text-dim);"></div>
     </div>
 
-    <!-- ══ STOCK ══ -->
-    <div class="page" id="page-stock">
-      <div class="section-title">Stock Levels <small>All products — QoH per branch</small></div>
-      <div class="filter-row">
-        <input class="si" id="stock-search" placeholder="Search product or ref..." oninput="renderStock()" style="width:240px">
-        <select class="si" id="stock-cat" style="width:180px" onchange="renderStock()"><option value="">All categories</option></select>
-        <select class="si" id="stock-status" style="width:160px" onchange="renderStock()">
-          <option value="">All statuses</option>
-          <option value="zero">Zero Total</option>
-          <option value="low">Low Total (≤5)</option>
-          <option value="ok">OK</option>
-        </select>
-        <button class="btn btn-outline" onclick="exportTableToExcel('stock-tbl','Stock_All_Branches')">⬇ Export Excel</button>
-      </div>
-      <div class="table-wrap" style="overflow-x:auto;">
-        <table id="stock-tbl">
-          <thead id="stock-thead"></thead>
-          <tbody id="stock-body"><tr class="empty-row"><td colspan="8">Import data first</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
     <!-- ══ LOST SALES ══ -->
     <div class="page" id="page-lostsales">
       <div class="section-title">Lost Sales <small>Take action on each item</small></div>
@@ -275,6 +251,7 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
           <option value="transfer">🔀 Transfer possible</option>
           <option value="order">🛒 Needs order</option>
         </select>
+        <button class="btn btn-blue" onclick="approveAllTransfers()" id="btn-approve-all">✅ Approve All Transfers</button>
         <button class="btn btn-outline" onclick="exportTableToExcel('lost-tbl','Lost_Sales')">⬇ Export Excel</button>
       </div>
       <div id="lost-alert"></div>
@@ -318,24 +295,6 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
       </div>
       <div id="po-alert"></div>
       <div id="po-container"><div style="text-align:center;color:var(--text-dim);padding:40px;font-size:14px;">No purchase orders yet — create orders from the Lost Sales tab</div></div>
-    </div>
-
-    <!-- ══ BRANCH REPORTS ══ -->
-    <div class="page" id="page-branchreport">
-      <div class="section-title">Branch Reports <small>Export per-branch stock for managers</small></div>
-      <div class="filter-row">
-        <select class="si" id="br-branch" style="width:260px" onchange="renderBranchReport()"><option value="">Select a branch...</option></select>
-        <input class="si" id="br-search" placeholder="Search product..." oninput="renderBranchReport()" style="width:200px">
-        <button class="btn btn-green" onclick="exportBranchReport()">⬇ Export This Branch</button>
-        <button class="btn btn-outline" onclick="exportAllBranches()">⬇ Export All Branches</button>
-      </div>
-      <div id="br-subtitle" style="font-size:13px;color:var(--text-dim);margin-bottom:12px;"></div>
-      <div class="table-wrap">
-        <table id="br-tbl">
-          <thead><tr><th>Product</th><th>Ref</th><th>Brand</th><th>Category</th><th>Supplier</th><th>Sale Price</th><th>Cost</th><th>QoH</th><th>Status</th></tr></thead>
-          <tbody id="br-body"><tr class="empty-row"><td colspan="9">Select a branch above</td></tr></tbody>
-        </table>
-      </div>
     </div>
 
   </div><!-- /content -->
@@ -528,7 +487,6 @@ function populateBranchSelects(){
 function processAll(){
   if(!stockData.length && !lostData.length){ setAlert('import-alert','Upload at least one file first.','error'); return; }
   buildOverview();
-  renderStock();
   renderLostSales();
   renderTransferOrders();
   renderPurchaseOrders();
@@ -803,9 +761,9 @@ function renderPurchaseOrders(){
             <td>${x(p.product_name)}</td>
             <td style="color:var(--text-dim);font-size:12px">${x(p.ref)}</td>
             <td>${x(p.branch)}</td>
-            <td><strong>${p.qty}</strong></td>
+            <td><input type="number" value="${p.qty}" min="1" style="width:70px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none;" onchange="updatePOQty('${p.id}',this.value)" onclick="this.select()"></td>
             <td>${p.cost>0?p.cost.toFixed(2)+' SAR':'—'}</td>
-            <td>${p.total_cost>0?p.total_cost.toFixed(2)+' SAR':'—'}</td>
+            <td id="po-total-${p.id}">${p.total_cost>0?p.total_cost.toFixed(2)+' SAR':'—'}</td>
             <td>${p.status==='pending'?'<span class="badge badge-yellow">Pending</span>':'<span class="badge badge-green">Ordered</span>'}</td>
           </tr>`).join('')}
         </tbody>
@@ -974,7 +932,46 @@ async function loadFromSupabase(){
   updateBadges();
 }
 
-// ── BADGES ──
+// ── APPROVE ALL TRANSFERS (one click) ──
+async function approveAllTransfers(){
+  const btn = document.getElementById('btn-approve-all');
+  const transferable = pendingLost.filter(l => decide(l).type==='transfer');
+  if(!transferable.length){ setAlert('lost-alert','No transfer suggestions to approve.','info'); return; }
+  btn.disabled = true;
+  btn.textContent = `Approving ${transferable.length}...`;
+  let count = 0;
+  for(const item of transferable){
+    await approveTransfer(item.id);
+    count++;
+    btn.textContent = `Approving ${count}/${transferable.length}...`;
+  }
+  btn.disabled = false;
+  btn.textContent = '✅ Approve All Transfers';
+  setAlert('lost-alert', `✅ ${count} transfer orders created successfully!`, 'success');
+  renderLostSales();
+  updateBadges();
+}
+
+// ── UPDATE PO QTY ──
+function updatePOQty(id, newQty){
+  const po = purchaseOrders.find(p => p.id===id);
+  if(!po) return;
+  const qty = parseInt(newQty)||1;
+  po.qty = qty;
+  po.total_cost = qty * (po.cost||0);
+  // Update total cell live
+  const totalCell = document.getElementById('po-total-'+id);
+  if(totalCell) totalCell.textContent = po.total_cost>0 ? po.total_cost.toFixed(2)+' SAR' : '—';
+  // Update supplier header totals by re-rendering
+  renderPurchaseOrders();
+  // Save updated qty to Supabase notes
+  db.from('purchase_orders').update({
+    total_cost: po.total_cost,
+    notes: `Product: ${po.product_name} (${po.ref}) | Branch: ${po.branch} | Qty: ${qty} | Supplier: ${po.supplier}`
+  }).eq('id', id).then(({error}) => { if(error) console.warn('PO qty update:', error.message); });
+}
+
+
 function updateBadges(){
   const lostCount = pendingLost.length;
   const trCount   = transferOrders.filter(t=>t.status==='pending').length;
