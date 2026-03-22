@@ -907,15 +907,24 @@ function updatePOQty(id,newQty){
 function exportSupplierPO(supplier){
   const items=purchaseOrders.filter(p=>p.supplier===supplier);
   if(!items.length)return;
-  const data=[
-    [`Purchase Order — ${supplier}`,'','','','','',''],
-    [`Date: ${new Date().toLocaleDateString()}`,'','','','','',''],[''],
-    ['PO Number','Product','Ref','Branch','Qty','Unit Cost (SAR)','Total Cost (SAR)'],
-    ...items.map(p=>[p.po_number,p.product_name,p.ref,p.branch,p.qty,p.cost,p.total_cost]),
-  ];
-  const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(data);
-  XLSX.utils.book_append_sheet(wb,ws,'PO');
-  XLSX.writeFile(wb,`PO_${supplier.replace(/[^a-z0-9]/gi,'_')}.xlsx`);
+  // Build items array for template
+  const templateItems=items.map(p=>({
+    product_name: p.product_name||'',
+    ref:          p.ref||'',
+    qty:          p.qty||0,
+    cost:         p.cost||0,
+  }));
+  // Generate PO number from first item
+  const poNum=items[0].po_number||('PO-'+new Date().toISOString().slice(0,10).replace(/-/g,'')+'-001');
+  // Build URL with params
+  const baseUrl='https://moamenteam.github.io/juleb-dashboard/po-template.html';
+  const params=new URLSearchParams({
+    supplier: supplier,
+    po_number: poNum,
+    items: JSON.stringify(templateItems),
+  });
+  // Open template in new tab — pre-filled
+  window.open(baseUrl+'?'+params.toString(),'_blank');
 }
 
 function exportPOExcel(){
