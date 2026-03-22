@@ -251,31 +251,59 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
 
     <!-- ══ LOST SALES ══ -->
     <div class="page" id="page-lostsales">
-      <div class="section-title">Lost Sales <small>Take action on each item</small></div>
-      <div class="info-card">
-        <h3>How to use this tab</h3>
-        <p>
-          <strong style="color:var(--blue)">🔀 Approve Transfer</strong> — another branch has enough stock. Select your preferred source branch from the dropdown.<br>
-          <strong style="color:var(--purple)">🛒 Create Order</strong> — no branch has enough stock, needs purchasing.
-        </p>
+      <div class="section-title">Lost Sales</div>
+      <!-- Sub-tabs -->
+      <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:1px solid var(--border);">
+        <div id="ls-tab-pending" onclick="switchLostTab('pending')" style="padding:9px 20px;font-size:14px;font-weight:600;cursor:pointer;color:var(--accent);border-bottom:2px solid var(--accent);">🔍 Pending <span id="ls-pending-count" style="font-size:12px;color:var(--text-dim);font-weight:400;"></span></div>
+        <div id="ls-tab-archived" onclick="switchLostTab('archived')" style="padding:9px 20px;font-size:14px;font-weight:600;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent;">📦 Archived <span id="ls-archived-count" style="font-size:12px;color:var(--text-dim);font-weight:400;"></span></div>
       </div>
-      <div class="filter-row">
-        <input class="si" id="lost-search" placeholder="Search product..." oninput="renderLostSales()" style="width:240px">
-        <select class="si" id="lost-branch" style="width:200px" onchange="renderLostSales()"><option value="">All branches</option></select>
-        <select class="si" id="lost-decision" style="width:190px" onchange="renderLostSales()">
-          <option value="">All decisions</option>
-          <option value="transfer">🔀 Transfer possible</option>
-          <option value="order">🛒 Needs order</option>
-        </select>
-        <button class="btn btn-blue" onclick="approveAllTransfers()" id="btn-approve-all">✅ Approve All Transfers</button>
-        <button class="btn btn-outline" onclick="exportTableToExcel('lost-tbl','Lost_Sales')">⬇ Export</button>
+
+      <!-- PENDING SECTION -->
+      <div id="ls-section-pending">
+        <div class="info-card">
+          <h3>How to use this tab</h3>
+          <p>
+            <strong style="color:var(--blue)">🔀 Approve Transfer</strong> — another branch has enough stock.<br>
+            <strong style="color:var(--purple)">🛒 Create Order</strong> — no branch has enough, needs purchasing.<br>
+            <strong style="color:var(--text-dim)">📦 Archive</strong> — product unavailable from supplier, hide until manually unarchived.
+          </p>
+        </div>
+        <div class="filter-row">
+          <input class="si" id="lost-search" placeholder="Search product..." oninput="renderLostSales()" style="width:220px">
+          <select class="si" id="lost-branch" style="width:190px" onchange="renderLostSales()"><option value="">All branches</option></select>
+          <select class="si" id="lost-decision" style="width:180px" onchange="renderLostSales()">
+            <option value="">All decisions</option>
+            <option value="transfer">🔀 Transfer possible</option>
+            <option value="order">🛒 Needs order</option>
+          </select>
+          <button class="btn btn-blue" onclick="approveAllTransfers()" id="btn-approve-all">✅ Approve All Transfers</button>
+          <button class="btn btn-outline" onclick="exportTableToExcel('lost-tbl','Lost_Sales')">⬇ Export</button>
+        </div>
+        <div id="lost-alert"></div>
+        <div class="table-wrap">
+          <table id="lost-tbl">
+            <thead><tr><th>Product</th><th>Ref</th><th>Branch</th><th>Supplier</th><th>Req Qty</th><th>Avail</th><th>Lost Value</th><th>Suggestion</th><th>Transfer From</th><th>Action</th></tr></thead>
+            <tbody id="lost-body"><tr class="empty-row"><td colspan="10">Loading lost sales...</td></tr></tbody>
+          </table>
+        </div>
       </div>
-      <div id="lost-alert"></div>
-      <div class="table-wrap">
-        <table id="lost-tbl">
-          <thead><tr><th>Product</th><th>Ref</th><th>Branch</th><th>Supplier</th><th>Req Qty</th><th>Avail</th><th>Lost Value</th><th>Suggestion</th><th>Transfer From</th><th>Action</th></tr></thead>
-          <tbody id="lost-body"><tr class="empty-row"><td colspan="10">Loading lost sales...</td></tr></tbody>
-        </table>
+
+      <!-- ARCHIVED SECTION -->
+      <div id="ls-section-archived" style="display:none;">
+        <div class="info-card">
+          <h3>Archived Products</h3>
+          <p>These items were archived because they are unavailable from supplier. Click <strong>Unarchive</strong> to bring them back to Pending.</p>
+        </div>
+        <div class="filter-row">
+          <input class="si" id="arch-search" placeholder="Search product..." oninput="renderArchived()" style="width:240px">
+          <button class="btn btn-outline" onclick="loadArchivedProducts()">🔄 Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Product</th><th>Ref</th><th>Reason</th><th>Archived By</th><th>Date</th><th>Action</th></tr></thead>
+            <tbody id="archived-body"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -738,8 +766,10 @@ function renderLostSales(){
     } else {fromCell='<span style="color:var(--text-dim);font-size:12px">—</span>';}
     const actionBtns=d.type==='transfer'
       ?`<button class="btn btn-blue" onclick="approveTransfer('${l.id}')">✅ Transfer</button>
-         <button class="btn btn-purple" style="margin-top:4px" onclick="createOrder('${l.id}')">🛒 Order Instead</button>`
-      :`<button class="btn btn-purple" onclick="createOrder('${l.id}')">🛒 Create Order</button>`;
+         <button class="btn btn-purple" style="margin-top:4px" onclick="createOrder('${l.id}')">🛒 Order Instead</button>
+         <button class="btn btn-outline" style="margin-top:4px;color:var(--text-dim)" onclick="archiveProduct('${l.id}')">📦 Archive</button>`
+      :`<button class="btn btn-purple" onclick="createOrder('${l.id}')">🛒 Create Order</button>
+        <button class="btn btn-outline" style="margin-top:4px;color:var(--text-dim)" onclick="archiveProduct('${l.id}')">📦 Archive</button>`;
     return`<tr id="lost-row-${l.id}">
       <td>${x(l.product_name)}</td>
       <td style="color:var(--text-dim);font-size:12px">${x(l.ref)}</td>
@@ -766,6 +796,102 @@ async function approveAllTransfers(){
   btn.disabled=false;btn.textContent='✅ Approve All Transfers';
   setAlert('lost-alert',`✅ ${count} transfer orders created!`,'success');
   renderLostSales();updateBadges();
+}
+
+// ── LOST SALES SUB-TABS ──
+let archivedProducts=[];
+function switchLostTab(tab){
+  document.getElementById('ls-section-pending').style.display  = tab==='pending'  ?'block':'none';
+  document.getElementById('ls-section-archived').style.display = tab==='archived' ?'block':'none';
+  document.getElementById('ls-tab-pending').style.color        = tab==='pending'  ?'var(--accent)':'var(--text-dim)';
+  document.getElementById('ls-tab-archived').style.color       = tab==='archived' ?'var(--accent)':'var(--text-dim)';
+  document.getElementById('ls-tab-pending').style.borderBottom  = tab==='pending'  ?'2px solid var(--accent)':'2px solid transparent';
+  document.getElementById('ls-tab-archived').style.borderBottom = tab==='archived' ?'2px solid var(--accent)':'2px solid transparent';
+  if(tab==='archived') loadArchivedProducts();
+}
+
+// ── ARCHIVE PRODUCT ──
+async function archiveProduct(lostId){
+  const item=pendingLost.find(l=>l.id===lostId);
+  if(!item) return;
+  const reason=prompt('Archive "'+item.product_name+'"?\nReason (optional):','Unavailable from supplier');
+  if(reason===null) return;
+  const{error}=await db.from('archived_products').upsert({
+    product_ref:  item.ref||item.product_name,
+    product_name: item.product_name,
+    reason:       reason||'Unavailable from supplier',
+    archived_by:  currentUser?.email||'admin',
+  },{onConflict:'product_ref'});
+  if(error) console.warn('archive:',error.message);
+  if(item.supabase_id){
+    await db.from('lost_sales').update({status:'archived'}).eq('id',item.supabase_id);
+  }
+  await markActioned(lostId);
+  setAlert('lost-alert','📦 "'+item.product_name+'" archived — won\'t appear in lost sales until unarchived','info');
+  updateLostTabCounts();
+}
+
+// ── LOAD ARCHIVED PRODUCTS ──
+async function loadArchivedProducts(){
+  document.getElementById('archived-body').innerHTML='<tr class="loading-row"><td colspan="6"><span class="spinner"></span>Loading...</td></tr>';
+  const{data,error}=await db.from('archived_products').select('*').order('created_at',{ascending:false});
+  if(error){document.getElementById('archived-body').innerHTML='<tr class="empty-row"><td colspan="6">Error: '+error.message+'</td></tr>';return;}
+  archivedProducts=data||[];
+  renderArchived();
+  updateLostTabCounts();
+}
+
+function renderArchived(){
+  const q=(document.getElementById('arch-search')?.value||'').toLowerCase();
+  const tbody=document.getElementById('archived-body');
+  const rows=archivedProducts.filter(a=>(a.product_name||'').toLowerCase().includes(q)||(a.product_ref||'').toLowerCase().includes(q));
+  if(!rows.length){tbody.innerHTML='<tr class="empty-row"><td colspan="6">No archived products</td></tr>';return;}
+  tbody.innerHTML=rows.map(a=>`<tr>
+    <td>${x(a.product_name||'—')}</td>
+    <td style="color:var(--text-dim);font-size:12px">${x(a.product_ref||'—')}</td>
+    <td style="font-size:12px">${x(a.reason||'—')}</td>
+    <td style="font-size:12px;color:var(--text-dim)">${x(a.archived_by||'—')}</td>
+    <td style="font-size:12px;color:var(--text-dim)">${fmtDate(a.created_at)}</td>
+    <td><button class="btn btn-green" style="font-size:11px;padding:4px 10px;" onclick="unarchiveProduct('${a.id}')">↩ Unarchive</button></td>
+  </tr>`).join('');
+}
+
+async function unarchiveProduct(id){
+  const{error}=await db.from('archived_products').delete().eq('id',id);
+  if(error){alert('Error: '+error.message);return;}
+  archivedProducts=archivedProducts.filter(a=>a.id!==id);
+  renderArchived();
+  updateLostTabCounts();
+  setAlert('lost-alert','↩ Product unarchived — will appear in lost sales on next sync','success');
+}
+
+function updateLostTabCounts(){
+  const pEl=document.getElementById('ls-pending-count');
+  const aEl=document.getElementById('ls-archived-count');
+  if(pEl) pEl.textContent='('+pendingLost.length+')';
+  if(aEl) aEl.textContent='('+archivedProducts.length+')';
+}
+
+// ── MARK PO RECEIVED ──
+async function markReceived(id){
+  const po=purchaseOrders.find(p=>p.id===id);if(!po)return;
+  const{error}=await db.from('purchase_orders').update({status:'received'}).eq('id',id);
+  if(error){console.warn('received:',error.message);return;}
+  po.status='received';
+  renderPurchaseOrders();updateBadges();
+  setAlert('po-alert','📥 "'+po.product_name+'" marked as received','success');
+}
+
+async function markAllReceived(supplier){
+  const items=purchaseOrders.filter(p=>p.supplier===supplier&&(p.status==='pending'||p.status==='ordered'));
+  if(!items.length){setAlert('po-alert','No items to mark as received','info');return;}
+  if(!confirm('Mark all '+items.length+' items from "'+supplier+'" as received?'))return;
+  const ids=items.map(p=>p.id);
+  const{error}=await db.from('purchase_orders').update({status:'received'}).in('id',ids);
+  if(error){console.warn('markAllReceived:',error.message);return;}
+  items.forEach(p=>{p.status='received';});
+  renderPurchaseOrders();updateBadges();
+  setAlert('po-alert','📥 All '+ids.length+' items from "'+supplier+'" marked as received','success');
 }
 
 // ── APPROVE TRANSFER ──
@@ -881,6 +1007,7 @@ function renderPurchaseOrders(){
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           ${pending>0?`<span class="badge badge-yellow">${pending} pending</span>`:'<span class="badge badge-green">All done</span>'}
+          <button class="btn btn-green" onclick="markAllReceived('${sup.replace(/'/g,"\\'")}')">📥 Mark All Received</button>
           <button class="btn btn-outline" onclick="exportSupplierPO('${sup.replace(/'/g,"\\'")}')">⬇ Export PO</button>
           <button class="btn btn-red" onclick="cancelAllSupplierPOs('${sup.replace(/'/g,"\\'")}')">✕ Cancel All</button>
         </div>
@@ -895,8 +1022,11 @@ function renderPurchaseOrders(){
           <td><input type="number" value="${p.qty}" min="1" style="width:70px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none;" onchange="updatePOQty('${p.id}',this.value)" onclick="this.select()"></td>
           <td>${p.cost>0?p.cost.toFixed(2)+' SAR':'—'}</td>
           <td id="po-total-${p.id}">${p.total_cost>0?p.total_cost.toFixed(2)+' SAR':'—'}</td>
-          <td>${p.status==='pending'?'<span class="badge badge-yellow">Pending</span>':p.status==='cancelled'?'<span class="badge badge-red">Cancelled</span>':'<span class="badge badge-green">Ordered</span>'}</td>
-          <td>${p.status!=='cancelled'?`<button class="btn btn-red" style="padding:4px 10px;font-size:11px;" onclick="cancelPO('${p.id}')">✕ Cancel</button>`:''}</td>
+          <td>${p.status==='pending'?'<span class="badge badge-yellow">Pending</span>':p.status==='cancelled'?'<span class="badge badge-red">Cancelled</span>':p.status==='received'?'<span class="badge badge-green">Received</span>':'<span class="badge badge-blue">Ordered</span>'}</td>
+          <td style="display:flex;gap:4px;flex-wrap:wrap;">
+            ${p.status==='pending'||p.status==='ordered'?`<button class="btn btn-green" style="padding:4px 8px;font-size:11px;" onclick="markReceived('${p.id}')">📥 Received</button>`:''}
+            ${p.status!=='cancelled'&&p.status!=='received'?`<button class="btn btn-red" style="padding:4px 8px;font-size:11px;" onclick="cancelPO('${p.id}')">✕</button>`:''}
+          </td>
         </tr>`).join('')}</tbody>
       </table>
     </div>`;
@@ -1198,6 +1328,9 @@ async function loadFromSupabase(){
     status:p.status||'pending',created_at:p.created_at,
   }));
   renderTransferOrders();renderPurchaseOrders();updateBadges();
+  // Load archived products count for tab badge
+  const{data:archData}=await db.from('archived_products').select('id,product_ref,product_name,reason,archived_by,created_at').order('created_at',{ascending:false});
+  if(archData){archivedProducts=archData;updateLostTabCounts();}
 
   // Step 5 — Load stock (slow, runs last so it doesn't block everything else)
   await loadStockFromSupabase();
@@ -1327,6 +1460,7 @@ function updateBadges(){
   if(document.getElementById('st-lost'))document.getElementById('st-lost').textContent=pendingLost.length;
   if(document.getElementById('st-transfers'))document.getElementById('st-transfers').textContent=transferOrders.filter(t=>t.status==='pending').length;
   if(document.getElementById('st-pos'))document.getElementById('st-pos').textContent=purchaseOrders.filter(p=>p.status==='pending').length;
+  updateLostTabCounts();
 }
 function setBadge(id,count){const el=document.getElementById(id);if(!el)return;if(count>0){el.textContent=count;el.style.display='inline-block';}else el.style.display='none';}
 
