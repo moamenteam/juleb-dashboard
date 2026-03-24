@@ -343,6 +343,34 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:rgba(255,255,255,.02
       <div id="po-container"><div style="text-align:center;color:var(--text-dim);padding:40px;font-size:14px;">No purchase orders yet</div></div>
     </div>
 
+    <!-- ══ BRANCH TRANSFERS ══ -->
+    <div class="page" id="page-branch-transfers">
+      <div class="section-title">Branch Transfers <small id="bt-branch-label"></small></div>
+      <div class="info-card">
+        <h3>Review incoming transfers for your branch</h3>
+        <p>
+          <strong style="color:var(--accent)">✅ Confirm</strong> — item arrived, mark transfer as done.<br>
+          <strong style="color:var(--red)">❌ Reject</strong> — item not available or not needed, returns to Lost Sales for purchasing to order instead.
+        </p>
+      </div>
+      <div class="filter-row">
+        <input class="si" id="bt-search" placeholder="Search product..." oninput="renderBranchTransfers()" style="width:240px">
+        <select class="si" id="bt-status" style="width:160px" onchange="renderBranchTransfers()">
+          <option value="pending">Pending</option>
+          <option value="">All</option>
+          <option value="completed">Confirmed</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </div>
+      <div id="bt-alert"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Transfer #</th><th>Product</th><th>Ref</th><th>From Branch</th><th>Qty</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody id="bt-body"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ══ ADMIN PANEL ══ -->
     <div class="page" id="page-admin">
       <div class="section-title">Admin Panel <small>Manage users & permissions</small></div>
@@ -484,6 +512,7 @@ function buildNavTabs(profile){
     if(profile.tab_lostsales)tabs.push({id:'lostsales',label:'🔍 Lost Sales',badge:'badge-lost'});
     if(profile.tab_transfers)tabs.push({id:'transfers',label:'🔀 Transfer Orders',badge:'badge-transfer',badgeBg:'var(--blue)'});
     if(profile.tab_purchase) tabs.push({id:'purchase',label:'🛒 Purchase Orders',badge:'badge-po',badgeBg:'var(--purple)'});
+    if(profile.tab_branch_transfers)tabs.push({id:'branch-transfers',label:'📦 Branch Transfers',badge:'badge-branch-tr',badgeBg:'var(--orange)'});
     if(profile.role==='admin')tabs.push({id:'admin',label:'⚙️ Admin'});
   }
   tabs.forEach((t,i)=>{
@@ -510,6 +539,7 @@ function showPage(name,el){
   document.getElementById('page-'+name).classList.add('active');
   if(el)el.classList.add('active');
   if(name==='admin')loadUsers();
+  if(name==='branch-transfers')loadBranchTransfers();
 }
 
 // ── FILE HANDLING ──
@@ -979,6 +1009,148 @@ function renderTransferOrders(){
   </tr>`).join('');
 }
 
+// ── BRANCH TRANSFERS ──
+let branchTransfers=[];
+
+async function loadBranchTransfers(){
+  const assignedBranch=currentProfile?.assigned_branch;
+  const label=document.getElementById('bt-branch-label');
+  if(label) label.textContent=assignedBranch?'Branch: '+assignedBranch:'All Branches';
+
+  document.getElementById('bt-body').innerHTML='<tr class="loading-row"><td colspan="8"><span class="spinner"></span>Loading...</td></tr>';
+
+  // Load transfer orders for this branch
+  let query='transfer_orders?select=*&order=created_at.desc&limit=300';
+  const{data,error}=await db.from('transfer_orders').select('*').order('created_at',{ascending:false}).limit(300);
+  if(error){document.getElementById('bt-body').innerHTML='<tr class="empty-row"><td colspan="8">Error: '+error.message+'</td></tr>';return;}
+
+  // Filter by assigned branch if branch_manager
+  branchTransfers=(data||[]).map(t=>({
+    id:t.id,
+    transfer_number:t.transfer_number||'—',
+    product_name:t.notes?.match(/Product: ([^(]+)/)?.[1]?.trim()||'—',
+    ref:t.notes?.match(/\(([^)]+)\)/)?.[1]||'—',
+    from_branch:t.notes?.match(/From: ([^|]+)/)?.[1]?.trim()||'—',
+    to_branch:t.notes?.match(/To: (.+)/)?.[1]?.trim()||'—',
+    qty:t.quantity||0,
+    status:t.status||'pending',
+    branch_status:t.branch_status||'pending',
+    branch_note:t.branch_note||'',
+    created_at:t.created_at,
+  }));
+
+  // Filter to assigned branch for branch_manager
+  if(assignedBranch&&currentProfile?.role==='branch_manager'){
+    branchTransfers=branchTransfers.filter(t=>
+      t.to_branch.toLowerCase().trim()===assignedBranch.toLowerCase().trim()
+    );
+  }
+
+  renderBranchTransfers();
+  updateBranchBadge();
+}
+
+function renderBranchTransfers(){
+  const q=(document.getElementById('bt-search')?.value||'').toLowerCase();
+  const st=document.getElementById('bt-status')?.value||'pending';
+  const tbody=document.getElementById('bt-body');
+
+  const rows=branchTransfers.filter(t=>{
+    const nm=(t.product_name+' '+t.ref).toLowerCase();
+    const stOk=!st||(st==='pending'?t.branch_status==='pending'&&t.status==='pending':t.branch_status===st||t.status===st);
+    return nm.includes(q)&&stOk;
+  });
+
+  if(!rows.length){tbody.innerHTML='<tr class="empty-row"><td colspan="8">No transfers found</td></tr>';return;}
+
+  tbody.innerHTML=rows.map(t=>{
+    let statusBadge='';
+    if(t.branch_status==='confirmed'||t.status==='completed')
+      statusBadge='<span class="badge badge-green">✅ Confirmed</span>';
+    else if(t.branch_status==='rejected')
+      statusBadge='<span class="badge badge-red">❌ Rejected</span>';
+    else
+      statusBadge='<span class="badge badge-yellow">⏳ Pending</span>';
+
+    const isPending=t.branch_status==='pending'&&t.status==='pending';
+    const actions=isPending
+      ?`<div style="display:flex;gap:4px;">
+          <button class="btn btn-green" style="font-size:11px;padding:4px 10px;" onclick="confirmBranchTransfer('${t.id}')">✅ Confirm</button>
+          <button class="btn btn-red" style="font-size:11px;padding:4px 10px;" onclick="rejectBranchTransfer('${t.id}')">❌ Reject</button>
+        </div>`
+      :(t.branch_note?`<span style="font-size:11px;color:var(--text-dim)">${x(t.branch_note)}</span>`:'—');
+
+    return`<tr>
+      <td style="font-size:12px;color:var(--blue)">${x(t.transfer_number)}</td>
+      <td>${x(t.product_name)}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${x(t.ref)}</td>
+      <td><span class="badge badge-orange">${x(t.from_branch)}</span></td>
+      <td><strong>${t.qty}</strong></td>
+      <td style="font-size:12px;color:var(--text-dim)">${fmtDate(t.created_at)}</td>
+      <td>${statusBadge}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function confirmBranchTransfer(id){
+  const t=branchTransfers.find(o=>o.id===id);if(!t)return;
+  const{error}=await db.from('transfer_orders').update({
+    status:'completed',
+    branch_status:'confirmed',
+    branch_reviewed_by:currentUser?.email||'',
+    branch_reviewed_at:new Date().toISOString()
+  }).eq('id',id);
+  if(error){setAlert('bt-alert','Error: '+error.message,'error');return;}
+  t.status='completed';t.branch_status='confirmed';
+  // Remove from lost sales
+  if(t.ref){
+    const pid=productRefToId[t.ref];
+    if(pid) await db.from('lost_sales').delete().eq('product_id',pid).eq('status','pending');
+  }
+  renderBranchTransfers();updateBranchBadge();
+  setAlert('bt-alert','✅ Transfer confirmed — item marked as received','success');
+}
+
+async function rejectBranchTransfer(id){
+  const t=branchTransfers.find(o=>o.id===id);if(!t)return;
+  const reason=prompt('Reason for rejection (optional):','Item not available');
+  if(reason===null)return;
+  const note='Transfer Rejected — Order Instead'+(reason?': '+reason:'');
+  const{error}=await db.from('transfer_orders').update({
+    branch_status:'rejected',
+    branch_note:note,
+    branch_reviewed_by:currentUser?.email||'',
+    branch_reviewed_at:new Date().toISOString()
+  }).eq('id',id);
+  if(error){setAlert('bt-alert','Error: '+error.message,'error');return;}
+  t.branch_status='rejected';t.branch_note=note;
+  // Put back in lost sales as pending with rejection note
+  if(t.ref&&t.to_branch){
+    const pid=productRefToId[t.ref];
+    const bid=branchNameToId[t.to_branch.toLowerCase().trim()];
+    if(pid&&bid){
+      await db.from('lost_sales').insert({
+        product_id:pid,branch_id:bid,
+        requested_qty:t.qty,available_qty:0,
+        lost_value:0,status:'pending',
+        responsible_user:'⚠️ '+note,
+        date:new Date().toISOString().split('T')[0],
+        import_batch:'rejection_'+Date.now()
+      });
+    }
+  }
+  renderBranchTransfers();updateBranchBadge();
+  setAlert('bt-alert','❌ Transfer rejected — item returned to Lost Sales for ordering','info');
+  // Refresh lost sales if loaded
+  if(pendingLost.length) await loadLostSalesFromSupabase();
+}
+
+function updateBranchBadge(){
+  const pending=branchTransfers.filter(t=>t.branch_status==='pending'&&t.status==='pending').length;
+  setBadge('badge-branch-tr',pending);
+}
+
 async function completeTransfer(id){
   const t=transferOrders.find(o=>o.id===id);if(!t)return;
   t.status='completed';
@@ -1154,6 +1326,7 @@ function renderUserCard(u){
     {key:'tab_lostsales',label:'🔍 Lost Sales'},
     {key:'tab_transfers',label:'🔀 Transfers'},
     {key:'tab_purchase',label:'🛒 Purchase'},
+    {key:'tab_branch_transfers',label:'📦 Branch Transfers'},
   ];
   const toggles=tabs.map(t=>`
     <div class="toggle-item">
@@ -1182,6 +1355,7 @@ function renderUserCard(u){
         <div style="margin-top:4px;display:flex;align-items:center;gap:8px;">
           <select class="si" style="font-size:12px;padding:4px 8px;" onchange="updateUserRole('${u.id}',this.value)">
             <option value="purchasing" ${u.role==='purchasing'?'selected':''}>Purchasing</option>
+            <option value="branch_manager" ${u.role==='branch_manager'?'selected':''}>Branch Manager</option>
             <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
           </select>
           <span class="badge ${u.is_active?'badge-green':'badge-yellow'}">${u.is_active?'Active':'Inactive'}</span>
@@ -1193,6 +1367,14 @@ function renderUserCard(u){
       <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Tab Access</div>
       <div class="toggle-row">${toggles}</div>
     </div>
+    ${u.role==='branch_manager'?`
+    <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
+      <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🏪 Assigned Branch</div>
+      <select class="si" style="width:260px;font-size:13px;" onchange="updateUserBranch('${u.id}',this.value)">
+        <option value="">-- Select Branch --</option>
+        ${branches.map(b=>`<option value="${x(b)}" ${u.assigned_branch===b?'selected':''}>${x(b)}</option>`).join('')}
+      </select>
+    </div>`:''}
     ${u.role==='purchasing'?`<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
       <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Allowed Categories (Purchase Orders)</div>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Leave all unchecked = sees all categories</div>
@@ -1216,6 +1398,10 @@ async function updateUserTab(id,tabKey,val){
 async function updateUserRole(id,role){
   await db.from('user_profiles').update({role}).eq('id',id);
   loadUsers();
+}
+
+async function updateUserBranch(id,branch){
+  await db.from('user_profiles').update({assigned_branch:branch||null}).eq('id',id);
 }
 
 async function updateUserCategory(id,cat,checked,email){
@@ -1345,6 +1531,8 @@ async function loadFromSupabase(){
   // Load archived products count for tab badge
   const{data:archData}=await db.from('archived_products').select('id,product_ref,product_name,reason,archived_by,created_at').order('created_at',{ascending:false});
   if(archData){archivedProducts=archData;updateLostTabCounts();}
+  // Load branch transfers badge for branch managers
+  if(currentProfile&&currentProfile.tab_branch_transfers) await loadBranchTransfers();
 
   // Step 5 — Load stock (slow, runs last so it doesn't block everything else)
   await loadStockFromSupabase();
