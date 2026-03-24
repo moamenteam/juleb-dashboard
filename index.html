@@ -1258,7 +1258,8 @@ async function deletePO(id){
   await loadLostSalesFromSupabase();
   setAlert('po-alert','🗑 PO deleted — item returned to Lost Sales','success');
 }
-  const po=purchaseOrders.find(p=>p.id===id);
+
+async function cancelPO(id){
   if(!po)return;
   if(!confirm(`Cancel PO for "${po.product_name}"?`))return;
   const{error}=await db.from('purchase_orders').update({status:'cancelled'}).eq('id',id);
