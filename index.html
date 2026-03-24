@@ -878,6 +878,11 @@ async function markReceived(id){
   const{error}=await db.from('purchase_orders').update({status:'received'}).eq('id',id);
   if(error){console.warn('received:',error.message);return;}
   po.status='received';
+  // Remove related lost sales item
+  if(po.ref){
+    const pid=productRefToId[po.ref];
+    if(pid) await db.from('lost_sales').delete().eq('product_id',pid).eq('status','pending');
+  }
   renderPurchaseOrders();updateBadges();
   setAlert('po-alert','📥 "'+po.product_name+'" marked as received','success');
 }
@@ -890,6 +895,9 @@ async function markAllReceived(supplier){
   const{error}=await db.from('purchase_orders').update({status:'received'}).in('id',ids);
   if(error){console.warn('markAllReceived:',error.message);return;}
   items.forEach(p=>{p.status='received';});
+  // Remove related lost sales items
+  const pids=items.map(p=>productRefToId[p.ref]).filter(Boolean);
+  if(pids.length) await db.from('lost_sales').delete().in('product_id',pids).eq('status','pending');
   renderPurchaseOrders();updateBadges();
   setAlert('po-alert','📥 All '+ids.length+' items from "'+supplier+'" marked as received','success');
 }
@@ -975,6 +983,12 @@ async function completeTransfer(id){
   const t=transferOrders.find(o=>o.id===id);if(!t)return;
   t.status='completed';
   await db.from('transfer_orders').update({status:'completed'}).eq('transfer_number',t.transfer_number);
+  // Remove related lost sales item
+  if(t.ref&&t.to_branch){
+    const bid=branchNameToId[t.to_branch.toLowerCase().trim()];
+    const pid=productRefToId[t.ref];
+    if(bid&&pid) await db.from('lost_sales').delete().eq('product_id',pid).eq('branch_id',bid).eq('status','pending');
+  }
   renderTransferOrders();updateBadges();
 }
 
