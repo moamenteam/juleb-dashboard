@@ -1212,6 +1212,7 @@ function renderPurchaseOrders(){
           <td style="display:flex;gap:4px;flex-wrap:wrap;">
             ${p.status==='pending'||p.status==='ordered'?`<button class="btn btn-green" style="padding:4px 8px;font-size:11px;" onclick="markReceived('${p.id}')">📥 Received</button>`:''}
             ${p.status!=='cancelled'&&p.status!=='received'?`<button class="btn btn-red" style="padding:4px 8px;font-size:11px;" onclick="cancelPO('${p.id}')">✕</button>`:''}
+            <button class="btn btn-outline" style="padding:4px 8px;font-size:11px;color:var(--red);" onclick="deletePO('${p.id}')">🗑</button>
           </td>
         </tr>`).join('')}</tbody>
       </table>
@@ -1228,7 +1229,35 @@ function updatePOQty(id,newQty){
   }).eq('id',id).then(({error})=>{if(error)console.warn('PO qty:',error.message);});
 }
 
-async function cancelPO(id){
+async function deletePO(id){
+  const po=purchaseOrders.find(p=>p.id===id);if(!po)return;
+  if(!confirm(`Delete PO for "${po.product_name}"?\nThis will return the item to Lost Sales.`))return;
+  // Delete from Supabase
+  const{error}=await db.from('purchase_orders').delete().eq('id',id);
+  if(error){setAlert('po-alert','Error: '+error.message,'error');return;}
+  // Return item to lost sales in Supabase
+  if(po.ref||po.product_name){
+    const pid=productRefToId[po.ref];
+    const bid=branchNameToId[(po.branch||'').toLowerCase().trim()];
+    await db.from('lost_sales').insert({
+      product_id:pid||null,
+      branch_id:bid||null,
+      requested_qty:po.qty||1,
+      available_qty:0,
+      lost_value:0,
+      responsible_user:'↩ Returned from PO: '+po.po_number,
+      status:'pending',
+      date:new Date().toISOString().split('T')[0],
+      import_batch:'po_return_'+Date.now()
+    });
+  }
+  // Remove from local array
+  purchaseOrders=purchaseOrders.filter(p=>p.id!==id);
+  renderPurchaseOrders();updateBadges();
+  // Reload lost sales
+  await loadLostSalesFromSupabase();
+  setAlert('po-alert','🗑 PO deleted — item returned to Lost Sales','success');
+}
   const po=purchaseOrders.find(p=>p.id===id);
   if(!po)return;
   if(!confirm(`Cancel PO for "${po.product_name}"?`))return;
@@ -1613,18 +1642,15 @@ async function loadStockFromSupabase(){
 
 // ── LOAD LOST SALES ──
 async function loadLostSalesFromSupabase(){
-  // Never overwrite if user already has local data from manual import
-  if(pendingLost.length>0){
-    console.log('Keeping local lost sales data:',pendingLost.length,'items');
-    return;
-  }
   const{data,error}=await db.from('lost_sales')
-    .select('*, products(product_ref,name,category,cost,sale_price), branches(name)')
-    .eq('status','pending').order('created_at',{ascending:false});
+    .select('id,date,requested_qty,available_qty,lost_value,responsible_user,branch_id,product_id,status, products(product_ref,name,category,cost,sale_price), branches(name)')
+    .eq('status','pending')
+    .order('created_at',{ascending:false})
+    .limit(2000);
   if(error){console.warn('lost_sales load:',error.message);return;}
   if(!data||!data.length){
     console.log('No pending lost sales in Supabase');
-    renderLostSales();updateBadges();return;
+    pendingLost=[];renderLostSales();updateBadges();return;
   }
   console.log('Lost sales loaded from Supabase:',data.length);
   lostData=data.map(l=>({
