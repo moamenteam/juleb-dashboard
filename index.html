@@ -759,9 +759,23 @@ function decide(item){
   if(!stockData.length)return{type:'order',from:'',avail:0,candidates:[]};
   const prod=stockData.find(s=>s.ref===item.ref||s.product_name===item.product_name);
   if(!prod)return{type:'order',from:'',avail:0,candidates:[]};
+
+  // Normalize branch name for comparison — remove spaces, lowercase, remove dashes
+  function normBranch(b){ return (b||'').toLowerCase().replace(/[\s\-_]/g,''); }
+  const requestingNorm=normBranch(item.branch);
+
   const candidates=Object.entries(prod.branches)
-    .filter(([br,qty])=>br!==item.branch&&qty>item.requested_qty)
+    .filter(([br,qty])=>{
+      // Exclude the requesting branch using normalized comparison
+      if(normBranch(br)===requestingNorm) return false;
+      // Exclude MAIN WH from transfers (warehouse, not a dispensing branch)
+      if(normBranch(br).includes('main')||normBranch(br).includes('wh')) return false;
+      // Source must have MORE than the requested qty to spare
+      if(qty<=item.requested_qty) return false;
+      return true;
+    })
     .sort((a,b)=>b[1]-a[1]);
+
   if(candidates.length>0)return{type:'transfer',from:candidates[0][0],avail:candidates[0][1],candidates};
   return{type:'order',from:'',avail:0,candidates:[]};
 }
