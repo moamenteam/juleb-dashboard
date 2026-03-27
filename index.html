@@ -425,6 +425,20 @@ let charts={};
 
 // Transfer branch selection per item
 const selectedTransferBranch={};
+
+// Reserved stock — tracks qty already committed to pending transfers
+// Key: branchName, Value: { productRef: reservedQty }
+const reservedStock={};
+
+function getAvailableQty(branchName, productRef, totalQty){
+  const reserved=(reservedStock[branchName]||{})[productRef]||0;
+  return totalQty - reserved;
+}
+
+function reserveStock(branchName, productRef, qty){
+  if(!reservedStock[branchName]) reservedStock[branchName]={};
+  reservedStock[branchName][productRef]=(reservedStock[branchName][productRef]||0)+qty;
+}
 const CATEGORIES=['Medicines','Milk','Diapers','Cosmotics','Medical Aid'];
 
 /* ── AUTH TABS ── */
@@ -768,20 +782,19 @@ function decide(item){
   const prod=stockData.find(s=>s.ref===item.ref||s.product_name===item.product_name);
   if(!prod)return{type:'order',from:'',avail:0,candidates:[]};
 
-  // Normalize branch name for comparison — remove spaces, lowercase, remove dashes
   function normBranch(b){ return (b||'').toLowerCase().replace(/[\s\-_]/g,''); }
   const requestingNorm=normBranch(item.branch);
 
   const candidates=Object.entries(prod.branches)
     .filter(([br,qty])=>{
-      // Exclude the requesting branch using normalized comparison
       if(normBranch(br)===requestingNorm) return false;
-      // Exclude MAIN WH from transfers (warehouse, not a dispensing branch)
       if(normBranch(br).includes('main')||normBranch(br).includes('wh')) return false;
-      // Source must have MORE than the requested qty to spare
-      if(qty<=item.requested_qty) return false;
+      // Use available qty after reservations
+      const available=getAvailableQty(br, item.ref, qty);
+      if(available<=item.requested_qty) return false;
       return true;
     })
+    .map(([br,qty])=>[br, getAvailableQty(br, item.ref, qty)])
     .sort((a,b)=>b[1]-a[1]);
 
   if(candidates.length>0)return{type:'transfer',from:candidates[0][0],avail:candidates[0][1],candidates};
@@ -979,6 +992,7 @@ async function approveTransfer(lostId){
   }
 
   // Supabase confirmed → now safe to remove from Lost Sales
+  reserveStock(chosenBranch, item.ref, item.requested_qty); // prevent double-allocation
   const newTr={id:'tr_'+Date.now(),transfer_number:trNum,product_name:item.product_name,
     ref:item.ref,from_branch:chosenBranch,to_branch:item.branch,
     qty:item.requested_qty,status:'pending',created_at:new Date().toISOString()};
