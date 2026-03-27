@@ -265,13 +265,13 @@ window.onload = function() {
   document.getElementById('po-number').value = poNum;
   document.getElementById('po-number-display').textContent = poNum;
 
-  // Check if loaded from dashboard with items
+  // Check if loaded from dashboard — read from sessionStorage
   var params = new URLSearchParams(window.location.search);
   if (params.has('supplier')) {
     document.getElementById('supplier-name').value = decodeURIComponent(params.get('supplier'));
   }
 
-  // Add 3 empty rows to start
+  // Add 3 empty rows to start (will be replaced if data exists)
   addRow(); addRow(); addRow();
 };
 
@@ -381,18 +381,29 @@ function exportExcel() {
   XLSX.writeFile(wb, poNum + '_' + supplier.replace(/[^a-z0-9]/gi,'_') + '.xlsx');
 }
 
-// Load items from URL params if coming from dashboard
-var urlItems = new URLSearchParams(window.location.search).get('items');
-if (urlItems) {
+// Load PO data from sessionStorage if coming from dashboard
+var poDataRaw = sessionStorage.getItem('juleb_po_data');
+if (poDataRaw) {
   try {
-    var items = JSON.parse(decodeURIComponent(urlItems));
-    // Remove default empty rows first
-    document.getElementById('items-body').innerHTML = '';
-    rowCount = 0;
-    items.forEach(function(item) {
-      addRow(item.product_name, item.ref, item.qty, item.cost || 0);
-    });
-  } catch(e) { console.warn('Could not parse items:', e); }
+    var poData = JSON.parse(poDataRaw);
+    sessionStorage.removeItem('juleb_po_data'); // clear after reading
+
+    // Fill supplier and PO number
+    if (poData.supplier) document.getElementById('supplier-name').value = poData.supplier;
+    if (poData.po_number) {
+      document.getElementById('po-number').value = poData.po_number;
+      document.getElementById('po-number-display').textContent = poData.po_number;
+    }
+
+    // Fill items — replace empty rows
+    if (poData.items && poData.items.length) {
+      document.getElementById('items-body').innerHTML = '';
+      rowCount = 0;
+      poData.items.forEach(function(item) {
+        addRow(item.product_name, item.ref, item.qty, item.cost || 0);
+      });
+    }
+  } catch(e) { console.warn('Could not load PO data:', e); }
 }
 </script>
 </body>
