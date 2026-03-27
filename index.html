@@ -1349,24 +1349,17 @@ async function cancelAllSupplierPOs(supplier){
 function exportSupplierPO(supplier){
   const items=purchaseOrders.filter(p=>p.supplier===supplier);
   if(!items.length)return;
-  // Build items array for template
   const templateItems=items.map(p=>({
-    product_name: p.product_name||'',
-    ref:          p.ref||'',
-    qty:          p.qty||0,
-    cost:         p.cost||0,
+    product_name:p.product_name||'',
+    ref:p.ref||'',
+    qty:p.qty||0,
+    cost:p.cost||0,
   }));
-  // Generate PO number from first item
   const poNum=items[0].po_number||('PO-'+new Date().toISOString().slice(0,10).replace(/-/g,'')+'-001');
-  // Build URL with params
-  const baseUrl='https://moamenteam.github.io/juleb-dashboard/po-template.html';
-  const params=new URLSearchParams({
-    supplier: supplier,
-    po_number: poNum,
-    items: JSON.stringify(templateItems),
-  });
-  // Open template in new tab — pre-filled
-  window.open(baseUrl+'?'+params.toString(),'_blank');
+  // Store in sessionStorage — no URI length limit
+  const poData={supplier,po_number:poNum,items:templateItems};
+  sessionStorage.setItem('juleb_po_data',JSON.stringify(poData));
+  window.open('https://moamenteam.github.io/juleb-dashboard/po-template.html?from=dashboard','_blank');
 }
 
 function exportPOExcel(){
